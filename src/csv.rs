@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     account::Account,
-    engine::{Engine, Transaction},
+    engine::*,
     types::{AccountId, Currency, TransactionId},
 };
 
@@ -18,27 +18,13 @@ pub struct TransactionRaw {
 }
 
 impl TransactionRaw {
-    pub fn to_transaction(self) -> Result<(AccountId, Transaction), String> {
-        use Transaction::*;
-
+    pub fn to_transaction(&self) -> Result<(AccountId, Transaction), String> {
         match (self.typ.as_str(), self.amount) {
-            ("withdrawal", Some(amount)) => Ok((
-                self.client,
-                Withdrawal {
-                    id: self.tx,
-                    amount,
-                },
-            )),
-            ("deposit", Some(amount)) => Ok((
-                self.client,
-                Deposit {
-                    id: self.tx,
-                    amount,
-                },
-            )),
-            ("dispute", None) => Ok((self.client, Dispute { id: self.tx })),
-            ("resolve", None) => Ok((self.client, Resolve { id: self.tx })),
-            ("chargeback", None) => Ok((self.client, Chargeback { id: self.tx })),
+            ("withdrawal", Some(amount)) => Ok((self.client, withdrawal(self.tx, amount))),
+            ("deposit", Some(amount)) => Ok((self.client, deposit(self.tx, amount))),
+            ("dispute", None) => Ok((self.client, dispute(self.tx))),
+            ("resolve", None) => Ok((self.client, resolve(self.tx))),
+            ("chargeback", None) => Ok((self.client, chargeback(self.tx))),
             _ => Err(format!("transaction is not valid {:?}", self)),
         }
     }
@@ -47,15 +33,30 @@ impl TransactionRaw {
 pub fn process_csv(engine: &mut Engine, path: &str) -> Result<(), Box<dyn Error>> {
     let mut rdr = csv::Reader::from_path(path)?;
 
-    // todo: log errors
+    // todo: logging should be done via some loggin framework, like tokio's tracing
     rdr.deserialize()
         .flat_map(|raw: Result<TransactionRaw, _>| match raw {
             Ok(traw) => Some(traw),
-            Err(e) => None,
+            Err(_) => {
+                // println!("error parsing transaction: \n{}", e);
+                None
+            }
         })
-        .for_each(|traw| match traw.to_transaction() {
-            Ok((aid, t)) => engine.process(aid, t),
-            Err(_) => todo!(),
+        .flat_map(|traw| match traw.to_transaction() {
+            Ok((aid, t)) => Some((aid, t)),
+            Err(_) => {
+                // println!("error validating transaction: \n{}", e);
+                None
+            }
+        })
+        .for_each(|(aid, t)| {
+            #[allow(clippy::single_match)]
+            match engine.process(aid, t) {
+                Ok(_) => (),
+                Err(_) => {
+                    // println!("error processing transaction: \n{}", e);
+                }
+            }
         });
 
     Ok(())
@@ -75,9 +76,9 @@ impl AccountStorage {
         let (id, a) = account;
         Self {
             client: *id,
-            available: a.availible(),
-            held: a.held,
-            total: a.total,
+            available: a.availible().round_dp(4),
+            held: a.held.round_dp(4),
+            total: a.total.round_dp(4),
             locked: a.locked,
         }
     }

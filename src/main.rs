@@ -1,21 +1,19 @@
 use std::env::args;
 
-mod types;
 mod account;
-mod engine;
 mod csv;
+mod engine;
+mod types;
 
+use crate::csv::{dump_state, process_csv};
 use engine::Engine;
-use crate::csv::{process_csv, dump_state};
 
 fn main() {
     if let Some(path) = args().nth(1) {
         let mut engine = Engine::empty();
 
-        process_csv(&mut engine, &path)
-            .expect("failed processing transactions");
+        process_csv(&mut engine, &path).expect("failed processing transactions");
 
-        dump_state(&engine)
-            .expect("failed saving data");
+        dump_state(&engine).expect("failed saving data");
     }
 }
